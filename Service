@@ -1,0 +1,208 @@
+//**************************************************************
+// Global Variables
+//**************************************************************
+var TYPE_TABLE = {
+    "General Service Project": "*G",
+    "Large Group Service Project": "*G",
+    "Non-APO Project": "*N",
+    "Donation Hours": "*D",
+    "Soup Kitchen": "*S",
+    "Publicity": "*P"
+  };
+
+var TITLE;
+var TYPE;
+var HOST;
+var POINTS;
+
+var PROJECT_NAME_ROW = 2;
+
+//**************************************************************
+// UPDATE STARTS HERE
+//**************************************************************
+
+// Triggered when the form is submitted. Updates the spreadsheets
+function update(form) {
+  
+  Logger.log(form);
+  
+  // Read in form values
+  TITLE = form.values[1];  
+  POINTS = form.values[2];
+  TYPE = form.values[3];
+  HOST = [];
+  HOST[0] = form.values[4];
+  var attendeesB = form.values[5];
+  var attendeesP = form.values[6];
+  var attendeesBadB = form.values[7];
+  var attendeesBadP = form.values[8];
+  
+  Logger.log(TITLE);
+  Logger.log(POINTS);
+  Logger.log("Type: " + TYPE);
+  Logger.log("Host: " + HOST[0]);
+  Logger.log("Attendees: " + attendeesB);
+  Logger.log("Pledge Attendees: " + attendeesP);
+  Logger.log("Bad Attendees: " + attendeesBadB);
+  Logger.log("Bad Pledge Attendees: " + attendeesBadP);
+  
+  // Set up spreadsheet variables
+  if (TYPE == "General Service Project" || TYPE == "Large Group Service Project"){
+    var serviceSheetB = APOCore.getBrotherSheet("Service"); // brother service sheet
+    var serviceSheetP = APOCore.getPledgeSheet("Service Details"); // pledge service sheet
+  } else if(TYPE == "Publicity"){
+    var serviceSheetB = APOCore.getBrotherSheet("Publicity"); // brother service sheet
+    var serviceSheetP = APOCore.getPledgeSheet("Service Details"); // pledge service sheet
+  } else {
+    var serviceSheetB = APOCore.getBrotherSheet("SoupNonAPO"); // changing sheet for soup kitchens
+    var serviceSheetP = APOCore.getPledgeSheet("Service Details II"); // changing sheet for soup kitchens
+  }
+
+  // Update each spreadsheet with the form data
+  updateSheet(attendeesB, serviceSheetB);
+  updateSheet(attendeesP, serviceSheetP);
+}
+
+
+//**************************************************************
+// HELPERS
+//**************************************************************
+
+// Perform the steps to add a list of attendees for a project to a sheet
+function updateSheet(attendeesList, serviceSheet) {
+  // Get properly formatted list of attendees, format: "last; first"
+  var names = APOCore.parseNames(attendeesList);
+  
+  // Do not make any updates if there were no attendees submitted
+  if (names.length === 0) {
+    return -1;
+  }
+
+  // Insert a new column for the project and get the column index
+  var projectColumnIndex = insertProjectColumn(PROJECT_NAME_ROW, serviceSheet);
+  
+  // Write points for all attendees to the spreadsheet
+  writePoints(names, serviceSheet, projectColumnIndex, POINTS);
+}
+
+
+// Insert the new project as a column into the spreadsheet
+// Returns the number of the column that was just inserted
+function insertProjectColumn(projectRow, serviceSheet) {
+  // Set the active sheet to use for spreadsheet functions
+  APOCore.setActiveSheet(serviceSheet);
+  
+  // If a column for that project already exists, return its index 
+  // without creating  a new column
+  var existingColIdx = APOCore.getColumnIndexByKey(projectRow, TITLE);
+  if (existingColIdx != -1) {
+    return existingColIdx;
+  }
+  
+  // Add the column before the last column
+  var marker = TYPE_TABLE[TYPE];
+  var newColumnIndex = APOCore.getColumnIndexByKey(projectRow, marker)                                      
+  APOCore.addColumnWithName(newColumnIndex, TITLE)
+
+  return newColumnIndex;
+}
+
+
+// Takes in list of names, googlesheet, columnNumber, number of points, and whether or not they are the host.
+// Writes the points onto the spreadsheet.
+function writePoints(list, serviceSheet, columnNum, argPoints) {
+  // Set the active sheet to use for spreadsheet functions
+  APOCore.setActiveSheet(serviceSheet);
+
+  var firstNameColumnRange = serviceSheet.getRange("B:B");
+  list.forEach(function(name) {
+    var firstName = name.first;
+    var lastName = name.last;
+  
+    var start = 1;
+    var writePointsRange;
+    while (findRowNum(firstNameColumnRange,firstName,start) != -1) {
+        // find row number of the first name
+        var rowNum = findRowNum(firstNameColumnRange,firstName,start);           
+        // check to make sure the lastname also matches
+        if (serviceSheet.getRange(rowNum, 1, 1, 1).getValue().trim() == lastName) { 
+          // row = person, column = project
+          writePointsRange = serviceSheet.getRange(rowNum, columnNum, 1, 1);            
+          writePointsRange.setValue(argPoints);
+          
+          // breaks out of the loop to make sure hours are not doubled
+          break;                                                                             
+        } else {
+          start = rowNum+1; // procedes to next person with that first name
+        }
+    }
+  });
+}
+
+
+// Give hosting credit, CURRENTLY NOT IN USE
+function writeHost(serviceSheet, isPledgeSheet){
+  for (var h in HOST) {
+    if (TYPE == "General Service Project" || TYPE == "Large Group Service Project" || TYPE == "Soup Kitchen") {
+      var firstNameColumnRange = serviceSheet.getRange("B:B");
+      
+      var semi = HOST[h].indexOf(";");
+      var lastName = HOST[h].substring(0,semi).trim();
+      var firstName = HOST[h].substring(semi+2).trim();
+      
+      var start = 1;
+      var writeHostRange;
+
+      while(findRowNum(firstNameColumnRange,firstName,start) != -1) {
+        //finds row number of the first name
+        var rowNum = findRowNum(firstNameColumnRange,firstName,start);      
+        //checks to make sure the lastname also matches
+        if (serviceSheet.getRange(rowNum, 1, 1, 1).getValue().trim() == lastName) {             
+          if (isPledgeSheet) {
+            // goes to hosting column
+            writeHostRange = serviceSheet.getRange(rowNum, 11, 1, 1);                     
+            //writeHostRange.setValue("YES");
+          } else {
+            // goes to hosting column
+            writeHostRange = serviceSheet.getRange(rowNum, 8, 1, 1);                     
+            //writeHostRange.setValue("YES");
+          }
+          break;                                                                           
+        } else {
+          start = rowNum+1; 
+        }
+      }
+    }
+  }
+}
+
+
+// TODO: Move this into the core library
+// returns the row number of a value (searchKey) in a single column of values (range) starting at a specified index (start)
+function findRowNum(range,searchKey,start) {
+  var data = range.getValues();
+  for( var i = start-1; i < data.length; i++ )
+    if( searchKey == data[i][0] )
+      return i+1;
+  return -1;
+}
+
+
+//**************************************************************
+// Responses Spreadsheet Menu
+//**************************************************************
+
+// Resubmit the form with the data from the selected row
+function submitRow() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var currentData = sheet.getActiveRange();
+  update({values: currentData.getValues()[0]});
+}
+
+// The onOpen() function, when defined, is automatically invoked whenever the
+// spreadsheet is opened.
+function onOpen() {
+  APOCore.addMenu();
+  APOCore.addMenuOption("Submit Data", "submitRow");
+  APOCore.createMenu();
+}
